@@ -1,5 +1,6 @@
 from __future__ import unicode_literals
 
+from django.core.cache import caches, InvalidCacheBackendError
 from django.db import models
 from django.utils import timezone
 
@@ -13,30 +14,51 @@ class FileManager(models.Manager):
                  check_cache_miss=False, **kwargs):
         kwargs.update(dict(storage_hash=utils.get_storage_hash(storage),
                            name=name))
+
+        thumbnail_cache = None
+        if settings.THUMBNAIL_CACHE:
+            try:
+                thumbnail_cache = caches[settings.THUMBNAIL_CACHE]
+                cache_key = self._get_cache_key(kwargs)
+            except InvalidCacheBackendError as e:
+                if settings.THUMBNAIL_DEBUG:
+                    raise e
+
         if create:
             if update_modified:
                 defaults = kwargs.setdefault('defaults', {})
                 defaults['modified'] = update_modified
             obj, created = self.get_or_create(**kwargs)
+            if thumbnail_cache:
+                thumbnail_cache.set(cache_key, obj, None)
         else:
             created = False
             kwargs.pop('defaults', None)
-            try:
-                manager = self._get_thumbnail_manager()
-                obj = manager.get(**kwargs)
-            except self.model.DoesNotExist:
+            obj = None
+            if thumbnail_cache:
+                obj = thumbnail_cache.get(cache_key)
 
-                if check_cache_miss and storage.exists(name):
-                    # File already in storage, update cache. Using
-                    # get_or_create again in case this was updated while
-                    # storage.exists was running.
-                    obj, created = self.get_or_create(**kwargs)
-                else:
-                    return
+            if obj is None:
+                try:
+                    manager = self._get_thumbnail_manager()
+                    obj = manager.get(**kwargs)
+                except self.model.DoesNotExist:
+                    if check_cache_miss and storage.exists(name):
+                        # File already in storage, update cache. Using
+                        # get_or_create again in case this was updated while
+                        # storage.exists was running.
+                        obj, created = self.get_or_create(**kwargs)
+                        if thumbnail_cache:
+                            thumbnail_cache.set(cache_key, obj, None)
+                    else:
+                        return
 
         if update_modified and not created:
             if obj.modified != update_modified:
-                self.filter(pk=obj.pk).update(modified=update_modified)
+                obj.modified = update_modified
+                obj.save()
+                if thumbnail_cache:
+                    cache.set(cache_key, obj, None)
 
         return obj
 
