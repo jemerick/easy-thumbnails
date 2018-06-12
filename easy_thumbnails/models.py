@@ -43,8 +43,15 @@ class FileManager(models.Manager):
     def _get_thumbnail_manager(self):
         return self
 
+    def _get_cache_key(self, kwargs):
+        return 'et:source:{storage_hash}:{name}'.format(**kwargs)
+
 
 class ThumbnailManager(FileManager):
+
+    def _get_cache_key(self, kwargs):
+        kwargs['source_id'] = kwargs['source'].pk
+        return 'et:thumbnail:{storage_hash}:{name}:{source_id}'.format(**kwargs)
 
     def _get_thumbnail_manager(self):
         if settings.THUMBNAIL_CACHE_DIMENSIONS:
