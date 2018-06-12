@@ -4,6 +4,7 @@ except ImportError:
     from django.utils.six import BytesIO
 from os import path
 
+from django.core.cache import InvalidCacheBackendError
 from django.test import TestCase
 from django.utils import six
 from easy_thumbnails import files, utils, signals, exceptions, models, engine
@@ -369,6 +370,63 @@ class FilesTest(test.BaseTest):
         self.assertEqual(
             (thumb.width, thumb.height),
             (dimensions.width, dimensions.height))
+
+    def test_remote_storage_thumbnail_cache(self):
+        settings.THUMBNAIL_CACHE = 'default'
+        opts = {'size': (50, 50)}
+
+        # initial request to get and cache the thumbnail
+        self.remote_thumbnailer.get_thumbnail(opts)
+
+        # subsequent requests for thumbnails should cause 0 queries
+        with self.assertNumQueries(0):
+            for x in xrange(10):
+                self.remote_thumbnailer.get_thumbnail(opts)
+
+        # disable the cache
+        settings.THUMBNAIL_CACHE = None
+        # should be queries now
+        with self.assertNumQueries(1):
+            self.remote_thumbnailer.get_thumbnail(opts)
+
+    def test_invalid_thumbnail_cache_backend_name(self):
+        settings.THUMBNAIL_CACHE = 'DoesNotExist'
+        settings.THUMBNAIL_DEBUG = True
+        opts = {'size': (50, 50)}
+
+        # initial request to get and cache the thumbnail causes invalid
+        # cache backend error to be raised when in debug mode
+        self.assertRaises(InvalidCacheBackendError,
+            self.remote_thumbnailer.get_thumbnail, opts)
+
+        settings.THUMBNAIL_DEBUG = False
+
+        # ignore invalid cache
+        self.remote_thumbnailer.get_thumbnail(opts)
+
+        # with no cache, should be a query
+        with self.assertNumQueries(1):
+            self.remote_thumbnailer.get_thumbnail(opts)
+
+    def test_cache_key(self):
+        self.remote_thumbnailer.get_thumbnail({'size': (50, 50)})
+
+        source_kwargs = {
+            'storage_hash': utils.get_storage_hash(self.remote_storage),
+            'name': 'test.jpg',
+        }
+
+        thumbnail_kwargs = {
+            'storage_hash': utils.get_storage_hash(self.remote_storage),
+            'name': 'test.jpg',
+            'source': self.remote_thumbnailer.get_source_cache(),
+        }
+
+        file_manager = models.FileManager()
+        thumbnail_file_manager = models.ThumbnailManager()
+
+        self.assertEqual('et:source:8f08db99ccd8f4b32f52a0b45ded2df6:test.jpg', file_manager._get_cache_key(source_kwargs))
+        self.assertEqual('et:thumbnail:8f08db99ccd8f4b32f52a0b45ded2df6:test.jpg:1', thumbnail_file_manager._get_cache_key(thumbnail_kwargs))
 
     def test_thumbnail_created_signal(self):
 
