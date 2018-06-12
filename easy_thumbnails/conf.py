@@ -330,4 +330,12 @@ class Settings(AppSettings):
     :class:`easy_thumbnails.widgets.ImageClearableFileInput` widget.
     """
 
+    THUMBNAIL_CACHE = None
+    """
+    Use the named Django cache to cache sources and thumbnails for remote storages
+
+    Setting this to ``None`` (default) will disable caching. To enable it, set
+    this to the name of the Django cache you would like to use.
+    """
+
 settings = Settings()
